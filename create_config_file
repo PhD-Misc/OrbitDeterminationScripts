@@ -1,0 +1,174 @@
+#!/usr/bin/python3
+from __future__ import print_function, division
+from argparse import ArgumentParser
+import numpy as np
+from datetime import datetime, timedelta
+from skyfield.api import Topos, load, EarthSatellite
+from astropy.io import fits
+from astropy.wcs import WCS
+import matplotlib.pyplot as plt
+import yaml
+from tqdm import tqdm
+import spacetracktool as st
+from spacetracktool import operations as ops
+
+def daysOfYear(utc):
+    try:
+        time_delta = datetime.strptime(utc, '%Y-%m-%d %H:%M:%S.%f') - datetime.strptime("2016-01-01 00:00:00", '%Y-%m-%d %H:%M:%S')
+    except:
+        time_delta = datetime.strptime(utc, '%Y-%m-%d %H:%M:%S') - datetime.strptime("2016-01-01 00:00:00", '%Y-%m-%d %H:%M:%S')
+
+    return time_delta.total_seconds()/(24.0*60*60) +1
+
+def TLE_quer(UTC,  args):
+    query = st.SpaceTrackClient(args.user, args.passwd)
+    start_date = UTC + timedelta(hours=-24*args.pastDaysRange)
+    end_date = UTC + timedelta(hours=24*0)
+    date_range = ops.make_range_string(str(start_date.year) + "-" + str(start_date.month).zfill(2) + "-"+ str(start_date.day).zfill(2),
+        str(end_date.year) + "-" + str(end_date.month).zfill(2) + "-"+ str(end_date.day).zfill(2))
+    print(date_range)
+    result = query.tle_query(epoch=date_range, norad_cat_id=args.noradid)
+    return result
+
+
+def main(args):
+    
+    ### obtain wcs object and the datetime of the observation
+    hdu = fits.open(args.wcsFile)
+    obs_date = datetime.strptime(hdu[0].header["DATE-OBS"],'%Y-%m-%dT%H:%M:%S.%f')
+    obs_dayofyear = daysOfYear(str(obs_date))
+
+    ### query the 
+    result = TLE_quer(obs_date,  args)
+    e_array = []
+    i_array = []
+    ra_array =[]
+    aop_array = []
+    ma_array = []
+    mm_array = []
+    doy_array = []
+    line1_array = []
+    line2_array = []
+    date_array = []
+
+    for i in tqdm(range(len(result.json()[:]))):
+        line1 = result.json()[i]["TLE_LINE1"]
+        line2 = result.json()[i]["TLE_LINE2"]
+        utc = result.json()[i]["EPOCH"]
+        days = daysOfYear(utc)
+        date_array.append(days)
+        line1_array.append(line1)
+        line2_array.append(line2)
+        e = float(line2[26:33])/10000000
+        i =  float(line2[8:16])
+        ra = float(line2[17:25])
+        aop = float(line2[34:42])
+        ma = float(line2[43:51])
+        mm = float(line2[52:63])
+        doy = float(line1[20:32])
+        e_array.append(e)
+        i_array.append(i)
+        ra_array.append(ra)
+        aop_array.append(aop)
+        ma_array.append(ma)
+        mm_array.append(mm)
+        doy_array.append(doy)
+
+    ## determine the change in element value per day
+
+    e_array = np.array(e_array)
+    ra_array = np.degrees(np.unwrap(np.radians(ra_array), discont=np.pi))
+
+    ma_array = np.array(ma_array)
+    mm_array = np.array(mm_array)
+    date_array = np.array(date_array)
+    aop_array = np.degrees(np.unwrap(np.radians(aop_array), discont=np.pi))
+    i_array = np.degrees(np.unwrap(np.radians(i_array), discont=np.pi))
+
+    doy_array = np.array(doy_array)
+    e_per_day = abs(e_array[1:] - e_array[:-1])
+    ra_per_day = abs(ra_array[1:] - ra_array[:-1])
+    mm_per_day = abs(mm_array[1:] - mm_array[:-1])
+    i_per_day = abs(i_array[1:] - i_array[:-1])
+    aop_per_day = abs(aop_array[1:] - aop_array[:-1])
+    print("e {0} ra {1} mm {2} i {3} aop {4}".format(np.nanmax(e_per_day), np.nanmax(ra_per_day),\
+        np.nanmax(mm_per_day), np.nanmax(i_per_day), np.nanmax(aop_per_day)))
+
+
+    ## get the most recent tle values
+    past_args = date_array < obs_dayofyear
+    ## print initial guess
+    guess_i = i_array[-1]
+    guess_ra = ra_array[-1]
+    guess_e = e_array[-1]
+    guess_aop = aop_array[-1] 
+    guess_ma = ma_array[-1]
+    guess_mm = mm_array[-1]
+    guess_line1 = line1_array[-1]
+    guess_line2 = line2_array[-1]
+    guess_date = date_array[-1]
+
+    ## wrap the values to keep them between 0 and 360
+    while guess_ra > 360:
+        guess_ra -= 360
+    
+    while guess_ra < 0:
+        guess_ra += 360
+
+    while guess_aop > 360:
+        guess_aop -= 360
+    
+    while guess_aop < 0:
+        guess_aop += 360
+    
+
+    ## write data to yaml file
+    yaml_file = [{'initialGuess': {'i': float(guess_i),
+                                   'ra': float(guess_ra),
+                                   'e': float(guess_e),
+                                   'aop': float(guess_aop),
+                                   'ma': 100,
+                                   'mm': float(guess_mm)}}, 
+                {'maxLimits': { 'i': float(guess_i + np.nanmax(i_per_day)),
+                                'ra': float(guess_ra + np.nanmax(ra_per_day)),
+                                'e': float(guess_e + np.nanmax(e_per_day)),
+                                'aop': float(guess_aop + np.nanmax(aop_per_day)),
+                                'ma': 101,
+                                'mm': float(guess_mm + np.nanmax(mm_per_day))}},
+                 {'minLimits': { 'i': float(guess_i - np.nanmax(i_per_day)),
+                                'ra': float(guess_ra - np.nanmax(ra_per_day)),
+                                'e': float(guess_e - np.nanmax(e_per_day)),
+                                'aop': float(guess_aop - np.nanmax(aop_per_day)),
+                                'ma': 99,
+                                'mm': float(guess_mm - np.nanmax(mm_per_day))}}, 
+                {'niter': {'major': 300, 'minor': 80, 'step': 0.1}},
+                {'tle': {'line2': guess_line1, 'line3': guess_line2}}]
+
+
+    with open("auto_created_config" + str(args.noradid)+ ".yaml", 'w') as output_file:
+        documents = yaml.dump(yaml_file, output_file, default_flow_style=False)
+
+
+
+    
+
+
+
+if __name__ == "__main__":
+    parser = ArgumentParser("create_config_file",description="creates the config file for orbit determination")
+    parser.add_argument("--noradid", required=True, type=int, help="the noradid of the satellite")
+    parser.add_argument("--wcsFile", required=True, help="a dummy file that has the required wcs object and the date time of the observation")
+    parser.add_argument("--pastDaysRange",type=int, default=60, help="the number of past days to search for historic data")
+    parser.add_argument("--debug",type=bool,default=False, help="runs the script in debug mode")
+    parser.add_argument("--user",required=True, help="the user name of the spacetrack account")
+    parser.add_argument("--passwd", required=True, help="the password of the spacetrack account")
+    args = parser.parse_args()
+
+    global debug
+    debug = args.debug
+    
+
+    if debug:
+        print("running in debug mode")
+
+    main(args)
