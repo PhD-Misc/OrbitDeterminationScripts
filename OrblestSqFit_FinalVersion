@@ -304,8 +304,12 @@ def orbitDetermination(cfg, bootstrap=False):
     curve_fit_bounds = ((i_min/guess_i, ra_min/basin_ra, e_min/guess_e, aop_min/basin_aop, ma_min/basin_ma, mm_min/guess_mm),
                          (i_max/guess_i, ra_max/basin_ra, e_max/guess_e, aop_max/basin_aop, ma_max/basin_ma, mm_max/guess_mm))
 
+    diffValue = 1
+    if bootstrap:
+        diffValue = 0.01
+
     popt, pcov = curve_fit(curve_func, time_vector, list(x_array) + list(y_array), p0=(1,1,1,1,1,1), 
-                        method="dogbox", diff_step=0.01, bounds=curve_fit_bounds)
+                        method="dogbox", diff_step=diffValue, bounds=curve_fit_bounds)
 
     new_i, new_ra, new_e, new_aop, new_ma, new_mm = popt[0]*guess_i, popt[1]*basin_ra, popt[2]*guess_e, popt[3]*basin_aop, popt[4]*basin_ma, popt[5]*guess_mm
 
