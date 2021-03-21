@@ -498,13 +498,15 @@ def getMidPoints(MidTimeSteps, noradid, mwa, sat, ts, x_fit, y_fit, function):
 
     x_array, y_array, ra_array, dec_array, time_array = [] ,[], [], [], []
 
-    if debug:
-        #eprint("recalculating new mid timeSteps")
-        midTimeSteps = [i for i in headTimeSteps if i in tailTimeSteps]
-        #eprint("updated timeSteps are ")
-        #eprint("head " + str(headTimeSteps))
-        #eprint("tail " + str(tailTimeSteps))
-        #eprint("mid " + str(midTimeSteps))
+
+    midTimeSteps = [i for i in headTimeSteps if i in tailTimeSteps]
+    #if debug:
+    #    #eprint("recalculating new mid timeSteps")
+    #    
+    #    #eprint("updated timeSteps are ")
+    #    #eprint("head " + str(headTimeSteps))
+    #    #eprint("tail " + str(tailTimeSteps))
+    #    #eprint("mid " + str(midTimeSteps))
 
     for t in midTimeSteps:
         
